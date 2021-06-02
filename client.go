@@ -166,7 +166,8 @@ func (c *Client) ConfirmTx(txHash common.Hash, n uint, timeout time.Duration) (b
 		return false, err
 	}
 
-	for {
+	var gotTx *types.Transaction
+	for n > 0 {
 		select {
 		case header := <-headerChan:
 			block, err := c.RawClient.BlockByHash(ctx, header.Hash())
@@ -174,17 +175,20 @@ func (c *Client) ConfirmTx(txHash common.Hash, n uint, timeout time.Duration) (b
 				return false, err
 			}
 
-			gotTx := block.Transaction(txHash)
+			if gotTx == nil {
+				gotTx = block.Transaction(txHash)
+			}
+
 			if gotTx != nil {
-				// got tx receipt
-				// TODO: implement wait n blocks
-				return true, nil
+				n--
 			}
 		case <-ctx.Done():
 			// Not in chain
 			return false, nil
 		}
 	}
+
+	return true, nil
 }
 
 func (c *Client) MessageToTransactOpts(ctx context.Context, msg Message) (*bind.TransactOpts, error) {
@@ -198,17 +202,16 @@ func (c *Client) MessageToTransactOpts(ctx context.Context, msg Message) (*bind.
 		return nil, err
 	}
 
-	signFunc := func(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
-		chainID, err := c.RawClient.ChainID(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		return types.SignTx(tx, types.NewEIP2930Signer(chainID), msg.PrivateKey)
+	chainID, err := c.RawClient.ChainID(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	auth := bind.NewKeyedTransactor(msg.PrivateKey)
-	auth.Signer = signFunc
+	auth, err := bind.NewKeyedTransactorWithChainID(msg.PrivateKey, chainID)
+	if err != nil {
+		return nil, err
+	}
+
 	auth.Nonce = big.NewInt(int64(nonce))
 	auth.Value = msg.Value  // in wei
 	auth.GasLimit = msg.Gas // in units

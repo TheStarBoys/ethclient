@@ -41,7 +41,7 @@ func TestClient(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client.ConfirmTx(txOfContractCreation.Hash(), 6, 20*time.Second)
+	client.ConfirmTx(txOfContractCreation.Hash(), 2, 20*time.Second)
 
 	log.Info("TestContract creation transaction", "txHex", txOfContractCreation.Hash().Hex(), "contract", contractAddr.Hex())
 
@@ -87,7 +87,7 @@ func TestClient(t *testing.T) {
 
 	log.Info("contractCallTx send sucessul", "methodId", common.Bytes2Hex(methodId), "txHash", contractCallTx.Hash().Hex())
 
-	contains, err := client.ConfirmTx(contractCallTx.Hash(), 6, 20*time.Second)
+	contains, err := client.ConfirmTx(contractCallTx.Hash(), 2, 20*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
