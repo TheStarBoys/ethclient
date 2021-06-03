@@ -3,7 +3,6 @@ package ethclient
 import (
 	"context"
 	"crypto/ecdsa"
-	"fmt"
 	"math/big"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rpc"
 )
 
 type Client struct {
@@ -39,16 +39,21 @@ func Dial(rawurl string) (*Client, error) {
 	}, nil
 }
 
-func NewClient(c *ethclient.Client) (*Client, error) {
-	subscriber, err := NewChainSubscriber(c)
+func NewClient(c *rpc.Client) (*Client, error) {
+	ethc := ethclient.NewClient(c)
+	subscriber, err := NewChainSubscriber(ethc)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Client{
-		RawClient:  c,
+		RawClient:  ethc,
 		Subscriber: subscriber,
 	}, nil
+}
+
+func (c *Client) Close() {
+	c.RawClient.Close()
 }
 
 type Message struct {
@@ -88,7 +93,7 @@ func (c *Client) BatchSendMsg(ctx context.Context, msgs <-chan Message) (<-chan 
 
 func (c *Client) SendMsg(ctx context.Context, msg Message) (*types.Transaction, error) {
 	if msg.PrivateKey == nil {
-		return nil, fmt.Errorf("PrivateKey is nil")
+		return nil, ErrMessagePrivateKeyNil
 	}
 
 	msg.From = crypto.PubkeyToAddress(msg.PrivateKey.PublicKey)
@@ -193,7 +198,7 @@ func (c *Client) ConfirmTx(txHash common.Hash, n uint, timeout time.Duration) (b
 
 func (c *Client) MessageToTransactOpts(ctx context.Context, msg Message) (*bind.TransactOpts, error) {
 	if msg.PrivateKey == nil {
-		return nil, fmt.Errorf("PrivateKey is nil")
+		return nil, ErrMessagePrivateKeyNil
 	}
 	msg.From = crypto.PubkeyToAddress(msg.PrivateKey.PublicKey)
 

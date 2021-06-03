@@ -8,27 +8,39 @@ import (
 	"time"
 
 	"github.com/TheStarBoys/ethclient/contracts"
+	"github.com/TheStarBoys/ethtypes"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestClient(t *testing.T) {
 	log.Root().SetHandler(log.StdoutHandler)
-	log.Info("Dial.....")
-	client, err := Dial("ws://localhost:8546")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	log.Info("Dial successful!")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	t.Log("Dial.....")
+	server := rpc.NewServer()
+	defer server.Stop()
 
 	privateKey, _ := crypto.HexToECDSA("9a01f5c57e377e0239e6036b7b2d700454b760b2dab51390f1eeb2f64fe98b68")
+	addr := crypto.PubkeyToAddress(privateKey.PublicKey)
+	backend, _ := NewTestEthBackend(privateKey, core.GenesisAlloc{
+		addr: core.GenesisAccount{
+			Balance: new(big.Int).Mul(big.NewInt(1000), ethtypes.Kether),
+		},
+	})
+	defer backend.Close()
+
+	rpcClient, _ := backend.Attach()
+	client, err := NewClient(rpcClient)
+	defer client.RawClient.Close()
+
+	t.Log("Dial successful!")
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
 
 	// Deploy Test contract.
 	auth, err := client.MessageToTransactOpts(ctx, Message{PrivateKey: privateKey})
@@ -41,9 +53,13 @@ func TestClient(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client.ConfirmTx(txOfContractCreation.Hash(), 2, 20*time.Second)
+	t.Log("TestContract creation transaction", "txHex", txOfContractCreation.Hash().Hex(), "contract", contractAddr.Hex())
 
-	log.Info("TestContract creation transaction", "txHex", txOfContractCreation.Hash().Hex(), "contract", contractAddr.Hex())
+	time.Sleep(2 * time.Second)
+	_, isPending, _ := client.RawClient.TransactionByHash(ctx, txOfContractCreation.Hash())
+	t.Log("Confirm isPending:", isPending, "err", err)
+	client.ConfirmTx(txOfContractCreation.Hash(), 2, 20*time.Second)
+	t.Log("Confirm")
 
 	// Call contract method `testFunc1` id -> 0x88655d98
 	contractAbi, err := abi.JSON(bytes.NewBuffer([]byte(contracts.ContractsABI)))
@@ -116,10 +132,10 @@ func TestClient(t *testing.T) {
 				PrivateKey: privateKey,
 				To:         &to,
 			}
-			log.Info("Write MSG to channel")
+			t.Log("Write MSG to channel")
 		}
 
-		log.Info("Close send channel")
+		t.Log("Close send channel")
 		close(mesgs)
 	}()
 
@@ -127,5 +143,5 @@ func TestClient(t *testing.T) {
 		js, _ := tx.MarshalJSON()
 		log.Info("Get Transaction", "tx", string(js), "err", <-errs)
 	}
-	log.Info("Exit")
+	t.Log("Exit")
 }
