@@ -36,7 +36,7 @@ func TestClient(t *testing.T) {
 
 	rpcClient, _ := backend.Attach()
 	client, err := NewClient(rpcClient)
-	defer client.RawClient.Close()
+	defer client.RawClient().Close()
 
 	t.Log("Dial successful!")
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
@@ -48,7 +48,7 @@ func TestClient(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	contractAddr, txOfContractCreation, contract, err := contracts.DeployContracts(auth, client.RawClient)
+	contractAddr, txOfContractCreation, contract, err := contracts.DeployContracts(auth, client.RawClient())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestClient(t *testing.T) {
 	t.Log("TestContract creation transaction", "txHex", txOfContractCreation.Hash().Hex(), "contract", contractAddr.Hex())
 
 	time.Sleep(2 * time.Second)
-	_, isPending, _ := client.RawClient.TransactionByHash(ctx, txOfContractCreation.Hash())
+	_, isPending, _ := client.RawClient().TransactionByHash(ctx, txOfContractCreation.Hash())
 	t.Log("Confirm isPending:", isPending, "err", err)
 	client.ConfirmTx(txOfContractCreation.Hash(), 2, 20*time.Second)
 	t.Log("Confirm")
@@ -78,12 +78,12 @@ func TestClient(t *testing.T) {
 
 	log.Info("Method data", "data", common.Bytes2Hex(data))
 
-	if code, err := client.RawClient.CodeAt(ctx, contractAddr, nil); err != nil || len(code) == 0 {
+	if code, err := client.RawClient().CodeAt(ctx, contractAddr, nil); err != nil || len(code) == 0 {
 		t.Fatal("no code or has err: ", err)
 	}
 
 	// contract.TestFunc1(nil)
-	_, err = client.RawClient.CallContract(ctx, ethereum.CallMsg{
+	_, err = client.RawClient().CallContract(ctx, ethereum.CallMsg{
 		From: crypto.PubkeyToAddress(privateKey.PublicKey),
 		To:   &contractAddr,
 		Data: data,
@@ -108,7 +108,7 @@ func TestClient(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	receipt, err := client.RawClient.TransactionReceipt(ctx, contractCallTx.Hash())
+	receipt, err := client.RawClient().TransactionReceipt(ctx, contractCallTx.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}

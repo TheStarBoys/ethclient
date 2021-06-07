@@ -13,12 +13,11 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
 type Client struct {
-	RawClient *ethclient.Client
+	rawClient *ethclient.Client
 	Subscriber
 }
 
@@ -34,7 +33,7 @@ func Dial(rawurl string) (*Client, error) {
 	}
 
 	return &Client{
-		RawClient:  c,
+		rawClient:  c,
 		Subscriber: subscriber,
 	}, nil
 }
@@ -47,13 +46,18 @@ func NewClient(c *rpc.Client) (*Client, error) {
 	}
 
 	return &Client{
-		RawClient:  ethc,
+		rawClient:  ethc,
 		Subscriber: subscriber,
 	}, nil
 }
 
 func (c *Client) Close() {
-	c.RawClient.Close()
+	c.rawClient.Close()
+}
+
+// RawClient returns ethclient
+func (c *Client) RawClient() *ethclient.Client {
+	return c.rawClient
 }
 
 type Message struct {
@@ -77,14 +81,11 @@ func (c *Client) BatchSendMsg(ctx context.Context, msgs <-chan Message) (<-chan 
 	errs := make(chan error, 10)
 	go func() {
 		for msg := range msgs {
-			log.Info("Receive Msg from channel", "msg", msg)
 			tx, err := c.SendMsg(ctx, msg)
 			txs <- tx
 			errs <- err
-			log.Info("Send Msg successful", "tx", tx.Hash().Hex())
 		}
 
-		log.Info("Close BatchSendMsg channel")
 		close(txs)
 		close(errs)
 	}()
@@ -113,7 +114,7 @@ func (c *Client) SendMsg(ctx context.Context, msg Message) (*types.Transaction, 
 		return nil, err
 	}
 
-	chainID, err := c.RawClient.ChainID(ctx)
+	chainID, err := c.rawClient.ChainID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +124,7 @@ func (c *Client) SendMsg(ctx context.Context, msg Message) (*types.Transaction, 
 		return nil, err
 	}
 
-	err = c.RawClient.SendTransaction(ctx, signedTx)
+	err = c.rawClient.SendTransaction(ctx, signedTx)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +134,7 @@ func (c *Client) SendMsg(ctx context.Context, msg Message) (*types.Transaction, 
 
 func (c *Client) NewTransaction(ctx context.Context, msg ethereum.CallMsg) (*types.Transaction, error) {
 	if msg.Gas == 0 {
-		gas, err := c.RawClient.EstimateGas(ctx, msg)
+		gas, err := c.rawClient.EstimateGas(ctx, msg)
 		if err != nil {
 			return nil, err
 		}
@@ -143,14 +144,14 @@ func (c *Client) NewTransaction(ctx context.Context, msg ethereum.CallMsg) (*typ
 
 	if msg.GasPrice == nil || msg.GasPrice.Uint64() == 0 {
 		var err error
-		msg.GasPrice, err = c.RawClient.SuggestGasPrice(ctx)
+		msg.GasPrice, err = c.rawClient.SuggestGasPrice(ctx)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	// TODO: nonce manager
-	nonce, err := c.RawClient.PendingNonceAt(ctx, msg.From)
+	nonce, err := c.rawClient.PendingNonceAt(ctx, msg.From)
 	if err != nil {
 		return nil, err
 	}
@@ -164,50 +165,64 @@ func (c *Client) ConfirmTx(txHash common.Hash, n uint, timeout time.Duration) (b
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// use SubscribeNewHead to confirm the signed transaction was contained in the new block.
+	// Use SubscribeNewHead to confirm the signed transaction was contained in the new block.
 	headerChan := make(chan *types.Header)
 	err := c.SubscribeNewHead(ctx, headerChan)
 	if err != nil {
 		return false, err
 	}
 
-	var gotTx *types.Transaction
-	for n > 0 {
+	var blockMinedTx *big.Int
+	for {
 		select {
 		case header := <-headerChan:
-			block, err := c.RawClient.BlockByHash(ctx, header.Hash())
+			block, err := c.rawClient.BlockByHash(ctx, header.Hash())
 			if err != nil {
 				return false, err
 			}
 
-			if gotTx == nil {
-				gotTx = block.Transaction(txHash)
-			}
+			if blockMinedTx == nil {
+				// The tx is already mined at this block.
+				if block.Transaction(txHash) == nil {
+					blockMinedTx = block.Number()
+				}
+			} else {
+				// Reach n confirmations.
+				if target := new(big.Int).Add(blockMinedTx, big.NewInt(int64(n))); block.Number().Cmp(target) >= 0 {
+					// Double check whether tx contains the block
+					block, err := c.rawClient.BlockByNumber(ctx, blockMinedTx)
+					if err != nil {
+						return false, err
+					}
 
-			if gotTx != nil {
-				n--
+					if block.Transaction(txHash) == nil {
+						return false, nil
+					}
+
+					return true, nil
+				}
 			}
 		case <-ctx.Done():
 			// Not in chain
 			return false, nil
 		}
 	}
-
-	return true, nil
 }
 
+// MessageToTransactOpts .
+// NOTE: You must provide private key for signature.
 func (c *Client) MessageToTransactOpts(ctx context.Context, msg Message) (*bind.TransactOpts, error) {
 	if msg.PrivateKey == nil {
 		return nil, ErrMessagePrivateKeyNil
 	}
 	msg.From = crypto.PubkeyToAddress(msg.PrivateKey.PublicKey)
 
-	nonce, err := c.RawClient.PendingNonceAt(ctx, msg.From)
+	nonce, err := c.rawClient.PendingNonceAt(ctx, msg.From)
 	if err != nil {
 		return nil, err
 	}
 
-	chainID, err := c.RawClient.ChainID(ctx)
+	chainID, err := c.rawClient.ChainID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -218,8 +233,8 @@ func (c *Client) MessageToTransactOpts(ctx context.Context, msg Message) (*bind.
 	}
 
 	auth.Nonce = big.NewInt(int64(nonce))
-	auth.Value = msg.Value  // in wei
-	auth.GasLimit = msg.Gas // in units
+	auth.Value = msg.Value
+	auth.GasLimit = msg.Gas
 	auth.GasPrice = msg.GasPrice
 
 	return auth, nil
