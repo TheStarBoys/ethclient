@@ -58,17 +58,17 @@ func (cs *ChainSubscrier) subscribeFilterlog(ctx context.Context, fn resubscribe
 							vlog, err := cs.c.FilterLogs(ctx, query)
 							if err != nil {
 								if err == context.Canceled || err == context.DeadlineExceeded {
-									log.Info("subscribeFilterlog Filterlog exit...")
+									log.Debug("SubscribeFilterlog Filterlog exit...")
 									return
 								}
 
-								log.Error("ChainClient subscribeFilterlog filterlog", "err", err)
+								log.Warn("Client subscribeFilterlog filterlog", "err", err)
 								time.Sleep(reconnectInterval)
 								continue
 							}
 
 							if len(vlog) != 0 {
-								log.Info("ChainClient got missing log", "from", start, "to", end)
+								log.Debug("Client got missing log", "from", start, "to", end)
 							}
 
 							for _, l := range vlog {
@@ -83,7 +83,7 @@ func (cs *ChainSubscrier) subscribeFilterlog(ctx context.Context, fn resubscribe
 				lastLog = &result
 				resultChan <- result
 			case <-ctx.Done():
-				log.Info("subscribeFilterlog exit...")
+				log.Debug("SubscribeFilterlog exit...")
 				return
 			}
 		}
@@ -92,26 +92,26 @@ func (cs *ChainSubscrier) subscribeFilterlog(ctx context.Context, fn resubscribe
 	// the goroutine to subscribe filter log and send log to check channel.
 	go func() {
 		for {
-			log.Info("ChainClient resubscribe log...")
+			log.Debug("Client resubscribe log...")
 
 			sub, err := fn()
 			switch {
 			case err == context.Canceled || err == context.DeadlineExceeded:
-				log.Info("subscribeFilterlog exit...")
+				log.Debug("SubscribeFilterlog exit...")
 				return
 			case err != nil:
-				log.Error("ChainClient resubscribelogFunc  err: ", err)
+				log.Warn("Client resubscribelogFunc  err: ", err)
 				time.Sleep(reconnectInterval)
 				continue
 			}
 
 			select {
 			case err := <-sub.Err():
-				log.Error("ChainClient subscribe log err: ", err)
+				log.Warn("Client subscribe log err: ", err)
 				sub.Unsubscribe()
 				time.Sleep(reconnectInterval)
 			case <-ctx.Done():
-				log.Info("subscribeFilterlog exit...")
+				log.Debug("SubscribeFilterlog exit...")
 				return
 			}
 		}
@@ -138,7 +138,7 @@ func (cs *ChainSubscrier) subscribeNewHead(ctx context.Context, fn resubscribeFu
 		for {
 			select {
 			case <-ctx.Done():
-				log.Info("subscribeNewHead exit...")
+				log.Debug("SubscribeNewHead exit...")
 				return
 			case result := <-checkChan:
 				if lastHeader != nil {
@@ -152,18 +152,18 @@ func (cs *ChainSubscrier) subscribeNewHead(ctx context.Context, fn resubscribeFu
 							header, err := cs.c.HeaderByNumber(ctx, start)
 							switch err {
 							case context.DeadlineExceeded, context.Canceled:
-								log.Info("subscribeNewHead HeaderByNumber exit...")
+								log.Debug("SubscribeNewHead HeaderByNumber exit...")
 								return
 							case ethereum.NotFound:
-								log.Error("ChainClient subscribeNewHead err: header not found")
+								log.Warn("Client subscribeNewHead err: header not found")
 								time.Sleep(reconnectInterval)
 								continue
 							case nil:
-								log.Info("ChainClient get missing header", "number", start)
+								log.Debug("Client get missing header", "number", start)
 								start.Add(start, big.NewInt(1))
 								resultChan <- header
 							default: // ! nil
-								log.Error("ChainClient subscribeNewHead", "err", err)
+								log.Warn("Client subscribeNewHead", "err", err)
 								time.Sleep(reconnectInterval)
 								continue
 							}
@@ -179,21 +179,21 @@ func (cs *ChainSubscrier) subscribeNewHead(ctx context.Context, fn resubscribeFu
 	// the goroutine to subscribe new header and send header to check channel.
 	go func() {
 		for {
-			log.Info("ChainClient resubscribe...")
+			log.Debug("Client resubscribe...")
 			sub, err := fn()
 			if err != nil {
 				if err == context.Canceled || err == context.DeadlineExceeded {
-					log.Info("subscribeNewHead exit...")
+					log.Debug("SubscribeNewHead exit...")
 					return
 				}
-				log.Error("ChainClient resubscribeHeadFunc", "err", err)
+				log.Warn("ChainClient resubscribeHeadFunc", "err", err)
 				time.Sleep(reconnectInterval)
 				continue
 			}
 
 			select {
 			case err := <-sub.Err():
-				log.Error("ChainClient subscribe head", "err", err)
+				log.Warn("ChainClient subscribe head", "err", err)
 				sub.Unsubscribe()
 				time.Sleep(reconnectInterval)
 			}

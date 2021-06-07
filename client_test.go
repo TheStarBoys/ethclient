@@ -20,7 +20,8 @@ import (
 )
 
 func TestClient(t *testing.T) {
-	log.Root().SetHandler(log.StdoutHandler)
+	log.Root().SetHandler(log.DiscardHandler())
+	// log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.Root().GetHandler()))
 	t.Log("Dial.....")
 	server := rpc.NewServer()
 	defer server.Stop()
@@ -55,11 +56,11 @@ func TestClient(t *testing.T) {
 
 	t.Log("TestContract creation transaction", "txHex", txOfContractCreation.Hash().Hex(), "contract", contractAddr.Hex())
 
-	time.Sleep(2 * time.Second)
-	_, isPending, _ := client.RawClient().TransactionByHash(ctx, txOfContractCreation.Hash())
-	t.Log("Confirm isPending:", isPending, "err", err)
-	client.ConfirmTx(txOfContractCreation.Hash(), 2, 20*time.Second)
-	t.Log("Confirm")
+	contains, err := client.ConfirmTx(txOfContractCreation.Hash(), 2, 5*time.Second)
+	if err != nil {
+		t.Fatalf("Deploy Contract err: %v", err)
+	}
+	assert.Equal(t, true, contains)
 
 	// Call contract method `testFunc1` id -> 0x88655d98
 	contractAbi, err := abi.JSON(bytes.NewBuffer([]byte(contracts.ContractsABI)))
@@ -98,23 +99,22 @@ func TestClient(t *testing.T) {
 		Data:       data,
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Send single Message err: %v", err)
 	}
 
 	log.Info("contractCallTx send sucessul", "methodId", common.Bytes2Hex(methodId), "txHash", contractCallTx.Hash().Hex())
 
-	contains, err := client.ConfirmTx(contractCallTx.Hash(), 2, 20*time.Second)
+	contains, err = client.ConfirmTx(contractCallTx.Hash(), 2, 20*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assert.Equal(t, true, contains)
 
 	receipt, err := client.RawClient().TransactionReceipt(ctx, contractCallTx.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	log.Info("Receipt", "status", receipt.Status)
-
-	log.Info("weather transaction contains in chain", "contains", contains)
 
 	counter, err := contract.Counter(nil)
 	if err != nil {
@@ -141,7 +141,9 @@ func TestClient(t *testing.T) {
 
 	for tx := range txs {
 		js, _ := tx.MarshalJSON()
-		log.Info("Get Transaction", "tx", string(js), "err", <-errs)
+		err := <-errs
+		log.Info("Get Transaction", "tx", string(js), "err", err)
+		assert.Equal(t, nil, err)
 	}
 	t.Log("Exit")
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
@@ -133,6 +134,11 @@ func (c *Client) SendMsg(ctx context.Context, msg Message) (*types.Transaction, 
 }
 
 func (c *Client) NewTransaction(ctx context.Context, msg ethereum.CallMsg) (*types.Transaction, error) {
+	if msg.To == nil {
+		to := common.HexToAddress("0x0")
+		msg.To = &to
+	}
+
 	if msg.Gas == 0 {
 		gas, err := c.rawClient.EstimateGas(ctx, msg)
 		if err != nil {
@@ -176,19 +182,19 @@ func (c *Client) ConfirmTx(txHash common.Hash, n uint, timeout time.Duration) (b
 	for {
 		select {
 		case header := <-headerChan:
-			block, err := c.rawClient.BlockByHash(ctx, header.Hash())
+			currBlock, err := c.rawClient.BlockByHash(ctx, header.Hash())
 			if err != nil {
 				return false, err
 			}
 
 			if blockMinedTx == nil {
 				// The tx is already mined at this block.
-				if block.Transaction(txHash) == nil {
-					blockMinedTx = block.Number()
+				if currBlock.Transaction(txHash) != nil {
+					blockMinedTx = currBlock.Number()
 				}
 			} else {
 				// Reach n confirmations.
-				if target := new(big.Int).Add(blockMinedTx, big.NewInt(int64(n))); block.Number().Cmp(target) >= 0 {
+				if target := new(big.Int).Add(blockMinedTx, big.NewInt(int64(n))); currBlock.Number().Cmp(target) >= 0 {
 					// Double check whether tx contains the block
 					block, err := c.rawClient.BlockByNumber(ctx, blockMinedTx)
 					if err != nil {
@@ -199,6 +205,8 @@ func (c *Client) ConfirmTx(txHash common.Hash, n uint, timeout time.Duration) (b
 						return false, nil
 					}
 
+					log.Debug("Transaction reachs n confirmations",
+						"tx", txHash.Hex(), "block", blockMinedTx.Uint64(), "header", currBlock.NumberU64())
 					return true, nil
 				}
 			}
