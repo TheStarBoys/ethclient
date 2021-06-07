@@ -1,13 +1,3 @@
-# ethclient
-
-## Description
-Extension ethclient.
-
-## Prerequisites
-golang
-
-## Quick Start
-```go
 package main
 
 import (
@@ -85,6 +75,3 @@ func main() {
 		fmt.Printf("Send multiple message successful, txHash: %v, err: %v\n", tx.Hash().Hex(), <-errs)
 	}
 }
-```
-## License
-The ethclient library is licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html), also included in our repository in the COPYING.LESSER file.
