@@ -19,11 +19,17 @@ import (
 
 type Client struct {
 	rawClient *ethclient.Client
+	nm        *NonceManager
 	Subscriber
 }
 
 func Dial(rawurl string) (*Client, error) {
 	c, err := ethclient.Dial(rawurl)
+	if err != nil {
+		return nil, err
+	}
+
+	nm, err := NewNonceManager(c)
 	if err != nil {
 		return nil, err
 	}
@@ -35,12 +41,19 @@ func Dial(rawurl string) (*Client, error) {
 
 	return &Client{
 		rawClient:  c,
+		nm:         nm,
 		Subscriber: subscriber,
 	}, nil
 }
 
 func NewClient(c *rpc.Client) (*Client, error) {
 	ethc := ethclient.NewClient(c)
+
+	nm, err := NewNonceManager(ethc)
+	if err != nil {
+		return nil, err
+	}
+
 	subscriber, err := NewChainSubscriber(ethc)
 	if err != nil {
 		return nil, err
@@ -48,6 +61,7 @@ func NewClient(c *rpc.Client) (*Client, error) {
 
 	return &Client{
 		rawClient:  ethc,
+		nm:         nm,
 		Subscriber: subscriber,
 	}, nil
 }
@@ -156,8 +170,7 @@ func (c *Client) NewTransaction(ctx context.Context, msg ethereum.CallMsg) (*typ
 		}
 	}
 
-	// TODO: nonce manager
-	nonce, err := c.rawClient.PendingNonceAt(ctx, msg.From)
+	nonce, err := c.nm.PendingNonceAt(ctx, msg.From)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +238,7 @@ func (c *Client) MessageToTransactOpts(ctx context.Context, msg Message) (*bind.
 	}
 	msg.From = crypto.PubkeyToAddress(msg.PrivateKey.PublicKey)
 
-	nonce, err := c.rawClient.PendingNonceAt(ctx, msg.From)
+	nonce, err := c.nm.PendingNonceAt(ctx, msg.From)
 	if err != nil {
 		return nil, err
 	}
