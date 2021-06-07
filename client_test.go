@@ -9,7 +9,6 @@ import (
 
 	"github.com/TheStarBoys/ethclient/contracts"
 	"github.com/TheStarBoys/ethtypes"
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
@@ -84,13 +83,14 @@ func TestClient(t *testing.T) {
 	}
 
 	// contract.TestFunc1(nil)
-	_, err = client.RawClient().CallContract(ctx, ethereum.CallMsg{
+	_, err = client.CallMsg(ctx, Message{
 		From: crypto.PubkeyToAddress(privateKey.PublicKey),
 		To:   &contractAddr,
-		Data: data,
+		// Data: data,
+		Data: append(data, []byte("11")...),
 	}, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("CallMsg err: %v", err)
 	}
 
 	contractCallTx, err := client.SendMsg(ctx, Message{

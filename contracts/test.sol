@@ -12,4 +12,8 @@ contract Test {
         counter += 1;
         emit CounterUpdated(counter);
     }
+
+    function testReverted() public {
+        revert();
+    }
 }

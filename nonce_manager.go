@@ -21,7 +21,7 @@ func NewNonceManager(client *ethclient.Client) (*NonceManager, error) {
 	}, nil
 }
 
-func (nm *NonceManager) PendingNonceAt(context context.Context, account common.Address) (uint64, error) {
+func (nm *NonceManager) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
 
@@ -32,7 +32,7 @@ func (nm *NonceManager) PendingNonceAt(context context.Context, account common.A
 
 	nonce, ok := nm.nonceMap[account]
 	if !ok {
-		nonce, err = nm.client.PendingNonceAt(context, account)
+		nonce, err = nm.client.PendingNonceAt(ctx, account)
 		if err != nil {
 			return 0, err
 		}

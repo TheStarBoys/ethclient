@@ -19,15 +19,18 @@ import (
 
 type Client struct {
 	rawClient *ethclient.Client
+	rpcClient *rpc.Client
 	nm        *NonceManager
 	Subscriber
 }
 
 func Dial(rawurl string) (*Client, error) {
-	c, err := ethclient.Dial(rawurl)
+	rpcClient, err := rpc.Dial(rawurl)
 	if err != nil {
 		return nil, err
 	}
+
+	c := ethclient.NewClient(rpcClient)
 
 	nm, err := NewNonceManager(c)
 	if err != nil {
@@ -41,6 +44,7 @@ func Dial(rawurl string) (*Client, error) {
 
 	return &Client{
 		rawClient:  c,
+		rpcClient:  rpcClient,
 		nm:         nm,
 		Subscriber: subscriber,
 	}, nil
@@ -61,6 +65,7 @@ func NewClient(c *rpc.Client) (*Client, error) {
 
 	return &Client{
 		rawClient:  ethc,
+		rpcClient:  c,
 		nm:         nm,
 		Subscriber: subscriber,
 	}, nil
@@ -107,6 +112,33 @@ func (c *Client) BatchSendMsg(ctx context.Context, msgs <-chan Message) (<-chan 
 	return txs, errs
 }
 
+func (c *Client) CallMsg(ctx context.Context, msg Message, blockNumber *big.Int) (returnData []byte, err error) {
+	if msg.PrivateKey != nil {
+		msg.From = crypto.PubkeyToAddress(msg.PrivateKey.PublicKey)
+	}
+
+	ethMesg := ethereum.CallMsg{
+		From:       msg.From,
+		To:         msg.To,
+		Gas:        msg.Gas,
+		GasPrice:   msg.GasPrice,
+		Value:      msg.Value,
+		Data:       msg.Data,
+		AccessList: msg.AccessList,
+	}
+
+	return c.rawClient.CallContract(ctx, ethMesg, blockNumber)
+}
+
+func (c *Client) SafeSendMsg(ctx context.Context, msg Message) (*types.Transaction, error) {
+	_, err := c.CallMsg(ctx, msg, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.SendMsg(ctx, msg)
+}
+
 func (c *Client) SendMsg(ctx context.Context, msg Message) (*types.Transaction, error) {
 	if msg.PrivateKey == nil {
 		return nil, ErrMessagePrivateKeyNil
@@ -143,6 +175,9 @@ func (c *Client) SendMsg(ctx context.Context, msg Message) (*types.Transaction, 
 	if err != nil {
 		return nil, err
 	}
+
+	log.Debug("Send Message successfully", "txHash", signedTx.Hash().Hex(), "from", msg.From.Hex(),
+		"to", msg.To.Hex(), "value", msg.Value)
 
 	return signedTx, nil
 }
