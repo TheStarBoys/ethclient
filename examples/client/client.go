@@ -12,8 +12,10 @@ import (
 )
 
 func main() {
+	// The private key of your wallet address.
 	privateKey, _ := crypto.HexToECDSA("9a01f5c57e377e0239e6036b7b2d700454b760b2dab51390f1eeb2f64fe98b68")
 
+	// Dial Client.
 	chainUrl := "ws://localhost:8546"
 	client, err := ethclient.Dial(chainUrl)
 	if err != nil {
@@ -24,6 +26,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
+	// The address your want to send to.
 	to := common.HexToAddress("0x06514D014e997bcd4A9381bF0C4Dc21bD32718D4")
 
 	// Send single transaction.
@@ -59,7 +62,6 @@ func main() {
 	txs, errs := client.BatchSendMsg(ctx, mesgs)
 	go func() {
 		for i := 0; i < 5; i++ {
-			// The address you want to send tx to.
 			mesgs <- ethclient.Message{
 				PrivateKey: privateKey,
 				To:         &to,
