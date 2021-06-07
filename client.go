@@ -3,6 +3,7 @@ package ethclient
 import (
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -158,22 +159,22 @@ func (c *Client) SendMsg(ctx context.Context, msg Message) (*types.Transaction, 
 
 	tx, err := c.NewTransaction(ctx, ethMesg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewTransaction err: %v", err)
 	}
 
 	chainID, err := c.rawClient.ChainID(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Get Chain ID err: %v", err)
 	}
 
 	signedTx, err := types.SignTx(tx, types.NewEIP2930Signer(chainID), msg.PrivateKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SignTx err: %v", err)
 	}
 
 	err = c.rawClient.SendTransaction(ctx, signedTx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SendTransaction err: %v", err)
 	}
 
 	log.Debug("Send Message successfully", "txHash", signedTx.Hash().Hex(), "from", msg.From.Hex(),

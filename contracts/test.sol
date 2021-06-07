@@ -14,6 +14,6 @@ contract Test {
     }
 
     function testReverted() public {
-        revert();
+        revert("test reverted");
     }
 }
