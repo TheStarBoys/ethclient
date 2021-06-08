@@ -27,9 +27,23 @@ func NewChainSubscriber(c *ethclient.Client) (*ChainSubscrier, error) {
 	return &ChainSubscrier{c}, nil
 }
 
-// SubscribeFilterlog .
+// SubscribeFilterlog support getting logs from `From` block to `To` block and
+// auto reconnect if network disconnected.
 func (cs *ChainSubscrier) SubscribeFilterlogs(ctx context.Context, q ethereum.FilterQuery, ch chan<- types.Log) error {
-	checkChan := make(chan types.Log)
+	// checkChan := make(chan types.Log)
+
+	// Support from `From` block to latest block.
+	logs, err := cs.c.FilterLogs(ctx, q)
+	if err != nil {
+		return err
+	}
+
+	checkChan := make(chan types.Log, len(logs))
+
+	for _, l := range logs {
+		checkChan <- l
+	}
+
 	resubscribeFunc := func() (ethereum.Subscription, error) {
 		return cs.c.SubscribeFilterLogs(ctx, q, checkChan)
 	}
@@ -38,22 +52,42 @@ func (cs *ChainSubscrier) SubscribeFilterlogs(ctx context.Context, q ethereum.Fi
 }
 
 func (cs *ChainSubscrier) subscribeFilterlog(ctx context.Context, fn resubscribeFunc, query ethereum.FilterQuery, checkChan <-chan types.Log, resultChan chan<- types.Log) error {
-	// pipeline: ethclient subscribe --> checkChan(validate log and get missing log) --> resultChan --> user
+	// Pipeline: ethclient subscribe --> checkChan(validate log and get missing log) --> resultChan --> user
 
-	// the goroutine for geting missing log and sending log to result channel.
+	// Report whether the comming log has seen.
+	hasSeen := func(lastLog, commingLog types.Log) bool {
+		if lastLog.BlockNumber > commingLog.BlockNumber {
+			return true
+		} else if lastLog.BlockNumber == commingLog.BlockNumber {
+			if lastLog.TxIndex > commingLog.TxIndex {
+				return true
+			} else if lastLog.TxIndex == commingLog.TxIndex &&
+				lastLog.Index >= commingLog.Index {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	// The goroutine for geting missing log and sending log to result channel.
 	go func() {
 		var lastLog *types.Log
 		for {
 			select {
-			case result := <-checkChan:
+			case commingLog := <-checkChan:
 				if lastLog != nil {
-					if lastLog.BlockNumber > result.BlockNumber {
-						// ignore duplicate
+					if hasSeen(*lastLog, commingLog) {
+						log.Warn("Duplicate logs", "block", commingLog.BlockNumber, "tx", commingLog.TxHash.Hex(),
+							"txIndex", commingLog.TxIndex, "index", commingLog.Index)
 						continue
 					} else {
-						// retrieve potentially missing log
-						start, end := lastLog.BlockNumber+1, result.BlockNumber
-						for start < end {
+						// Lost some logs between lastLog and commingLog if the network disconnected.
+						// Retrieve potentially missing log and make sure not duplicate.
+
+						// TODO: There are many duplicate logs, and optimize here in future.
+						start, end := lastLog.BlockNumber, commingLog.BlockNumber
+						for start <= end {
 							query.FromBlock = big.NewInt(int64(start))
 							vlog, err := cs.c.FilterLogs(ctx, query)
 							if err != nil {
@@ -72,16 +106,23 @@ func (cs *ChainSubscrier) subscribeFilterlog(ctx context.Context, fn resubscribe
 							}
 
 							for _, l := range vlog {
+								l := l
+								if hasSeen(*lastLog, l) {
+									log.Debug("Duplicate logs", "block", l.BlockNumber, "tx", l.TxHash.Hex(),
+										"txIndex", l.TxIndex, "index", l.Index, "last", *lastLog)
+									continue
+								}
+								lastLog = &l
 								resultChan <- l
 							}
 
-							start = end
+							start = end + 1
 						}
-
 					}
+				} else {
+					lastLog = &commingLog
+					resultChan <- commingLog
 				}
-				lastLog = &result
-				resultChan <- result
 			case <-ctx.Done():
 				log.Debug("SubscribeFilterlog exit...")
 				return
@@ -89,7 +130,7 @@ func (cs *ChainSubscrier) subscribeFilterlog(ctx context.Context, fn resubscribe
 		}
 	}()
 
-	// the goroutine to subscribe filter log and send log to check channel.
+	// The goroutine to subscribe filter log and send log to check channel.
 	go func() {
 		for {
 			log.Debug("Client resubscribe log...")
@@ -132,7 +173,7 @@ func (cs *ChainSubscrier) SubscribeNewHead(ctx context.Context, ch chan<- *types
 
 // subscribeNewHead subscribes new header and auto reconnect if the connection lost.
 func (cs *ChainSubscrier) subscribeNewHead(ctx context.Context, fn resubscribeFunc, checkChan <-chan *types.Header, resultChan chan<- *types.Header) error {
-	// the goroutine for geting missing header and sending header to result channel.
+	// The goroutine for geting missing header and sending header to result channel.
 	go func() {
 		var lastHeader *types.Header
 		for {
@@ -143,10 +184,10 @@ func (cs *ChainSubscrier) subscribeNewHead(ctx context.Context, fn resubscribeFu
 			case result := <-checkChan:
 				if lastHeader != nil {
 					if lastHeader.Number.Cmp(result.Number) >= 0 {
-						// ignore duplicate
+						// Ignore duplicate
 						continue
 					} else {
-						// get missing headers
+						// Get missing headers
 						start, end := new(big.Int).Add(lastHeader.Number, big.NewInt(1)), result.Number
 						for start.Cmp(end) < 0 {
 							header, err := cs.c.HeaderByNumber(ctx, start)
@@ -176,7 +217,7 @@ func (cs *ChainSubscrier) subscribeNewHead(ctx context.Context, fn resubscribeFu
 		}
 	}()
 
-	// the goroutine to subscribe new header and send header to check channel.
+	// The goroutine to subscribe new header and send header to check channel.
 	go func() {
 		for {
 			log.Debug("Client resubscribe...")
