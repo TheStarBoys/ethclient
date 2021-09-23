@@ -234,9 +234,11 @@ func (cs *ChainSubscrier) subscribeNewHead(ctx context.Context, fn resubscribeFu
 
 			select {
 			case err := <-sub.Err():
-				log.Warn("ChainClient subscribe head", "err", err)
-				sub.Unsubscribe()
-				time.Sleep(reconnectInterval)
+				if err != nil {
+					log.Warn("ChainClient subscribe head", "err", err)
+					sub.Unsubscribe()
+					time.Sleep(reconnectInterval)
+				}
 			}
 		}
 	}()

@@ -284,12 +284,7 @@ func (c *Client) MessageToTransactOpts(ctx context.Context, msg Message) (*bind.
 		return nil, err
 	}
 
-	chainID, err := c.rawClient.ChainID(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	auth, err := bind.NewKeyedTransactorWithChainID(msg.PrivateKey, chainID)
+	auth, err := c.NewKeyedTransactor(ctx, msg.PrivateKey)
 	if err != nil {
 		return nil, err
 	}
@@ -300,4 +295,22 @@ func (c *Client) MessageToTransactOpts(ctx context.Context, msg Message) (*bind.
 	auth.GasPrice = msg.GasPrice
 
 	return auth, nil
+}
+
+func (c *Client) NewKeyedTransactor(ctx context.Context, privateKey *ecdsa.PrivateKey) (*bind.TransactOpts, error) {
+	chainID, err := c.rawClient.ChainID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
+	if err != nil {
+		return nil, err
+	}
+
+	return auth, nil
+}
+
+func (c *Client) NonceManager() *NonceManager {
+	return c.nm
 }

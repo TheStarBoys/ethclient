@@ -3,6 +3,7 @@ package ethclient
 import (
 	"context"
 	"math/big"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ func deployTestContract(t *testing.T, ctx context.Context, client *Client) (comm
 		t.Fatal(err)
 	}
 
-	return contracts.DeployContracts(auth, client.RawClient())
+	return contracts.DeployContracts(auth, client.NonceManager())
 }
 
 func newTestClient(t *testing.T) *Client {
@@ -223,4 +224,60 @@ func TestContractRevert(t *testing.T) {
 	t.Log("Call Message err: ", err)
 	assert.Equal(t, 0, len(returnData))
 	assert.NotEqual(t, nil, err, "expect revert transaction")
+}
+
+func TestNonceManager(t *testing.T) {
+	client := newTestClient(t)
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	// Deploy Test contract.
+	contractAddr, txOfContractCreation, contract, err := deployTestContract(t, ctx, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log("TestContract creation transaction", "txHex", txOfContractCreation.Hash().Hex(), "contract", contractAddr.Hex())
+
+	contains, err := client.ConfirmTx(txOfContractCreation.Hash(), 2, 5*time.Second)
+	if err != nil {
+		t.Fatalf("Deploy Contract err: %v", err)
+	}
+	assert.Equal(t, true, contains)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			transactOpts, err := client.NewKeyedTransactor(ctx, privateKey)
+			if err != nil {
+				t.Error("get transact opts err: ", err)
+				return
+			}
+			tx, err := contract.TestFunc1(transactOpts, "1", big.NewInt(2), []byte("3"))
+			if err != nil {
+				t.Error(err)
+				return
+			}
+
+			contains, err := client.ConfirmTx(tx.Hash(), 2, 5*time.Second)
+			if err != nil {
+				t.Errorf("Calling TestFunc1 function fails, i: %v err: %v", i, err)
+				return
+			}
+			assert.Equal(t, true, contains)
+		}(i)
+	}
+
+	wg.Wait()
+
+	counter, err := contract.Counter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, uint64(10), counter.Uint64())
 }

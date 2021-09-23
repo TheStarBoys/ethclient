@@ -11,13 +11,13 @@ import (
 type NonceManager struct {
 	nonceMap map[common.Address]uint64
 	lock     sync.Mutex
-	client   *ethclient.Client
+	*ethclient.Client
 }
 
 func NewNonceManager(client *ethclient.Client) (*NonceManager, error) {
 	return &NonceManager{
 		nonceMap: make(map[common.Address]uint64),
-		client:   client,
+		Client:   client,
 	}, nil
 }
 
@@ -32,7 +32,7 @@ func (nm *NonceManager) PendingNonceAt(ctx context.Context, account common.Addre
 
 	nonce, ok := nm.nonceMap[account]
 	if !ok {
-		nonce, err = nm.client.PendingNonceAt(ctx, account)
+		nonce, err = nm.Client.PendingNonceAt(ctx, account)
 		if err != nil {
 			return 0, err
 		}
