@@ -3,6 +3,7 @@ package ethclient
 import (
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -19,11 +20,20 @@ import (
 
 type Client struct {
 	rawClient *ethclient.Client
+	rpcClient *rpc.Client
+	nm        *NonceManager
 	Subscriber
 }
 
 func Dial(rawurl string) (*Client, error) {
-	c, err := ethclient.Dial(rawurl)
+	rpcClient, err := rpc.Dial(rawurl)
+	if err != nil {
+		return nil, err
+	}
+
+	c := ethclient.NewClient(rpcClient)
+
+	nm, err := NewNonceManager(c)
 	if err != nil {
 		return nil, err
 	}
@@ -35,12 +45,20 @@ func Dial(rawurl string) (*Client, error) {
 
 	return &Client{
 		rawClient:  c,
+		rpcClient:  rpcClient,
+		nm:         nm,
 		Subscriber: subscriber,
 	}, nil
 }
 
 func NewClient(c *rpc.Client) (*Client, error) {
 	ethc := ethclient.NewClient(c)
+
+	nm, err := NewNonceManager(ethc)
+	if err != nil {
+		return nil, err
+	}
+
 	subscriber, err := NewChainSubscriber(ethc)
 	if err != nil {
 		return nil, err
@@ -48,6 +66,8 @@ func NewClient(c *rpc.Client) (*Client, error) {
 
 	return &Client{
 		rawClient:  ethc,
+		rpcClient:  c,
+		nm:         nm,
 		Subscriber: subscriber,
 	}, nil
 }
@@ -93,6 +113,38 @@ func (c *Client) BatchSendMsg(ctx context.Context, msgs <-chan Message) (<-chan 
 	return txs, errs
 }
 
+func (c *Client) CallMsg(ctx context.Context, msg Message, blockNumber *big.Int) (returnData []byte, err error) {
+	if msg.PrivateKey != nil {
+		msg.From = crypto.PubkeyToAddress(msg.PrivateKey.PublicKey)
+	}
+
+	ethMesg := ethereum.CallMsg{
+		From:       msg.From,
+		To:         msg.To,
+		Gas:        msg.Gas,
+		GasPrice:   msg.GasPrice,
+		Value:      msg.Value,
+		Data:       msg.Data,
+		AccessList: msg.AccessList,
+	}
+
+	return c.rawClient.CallContract(ctx, ethMesg, blockNumber)
+}
+
+func (c *Client) SafeSendMsg(ctx context.Context, msg Message) (*types.Transaction, []byte, error) {
+	returnData, err := c.CallMsg(ctx, msg, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tx, err := c.SendMsg(ctx, msg)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return tx, returnData, err
+}
+
 func (c *Client) SendMsg(ctx context.Context, msg Message) (*types.Transaction, error) {
 	if msg.PrivateKey == nil {
 		return nil, ErrMessagePrivateKeyNil
@@ -112,23 +164,26 @@ func (c *Client) SendMsg(ctx context.Context, msg Message) (*types.Transaction, 
 
 	tx, err := c.NewTransaction(ctx, ethMesg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("NewTransaction err: %v", err)
 	}
 
 	chainID, err := c.rawClient.ChainID(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Get Chain ID err: %v", err)
 	}
 
 	signedTx, err := types.SignTx(tx, types.NewEIP2930Signer(chainID), msg.PrivateKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SignTx err: %v", err)
 	}
 
 	err = c.rawClient.SendTransaction(ctx, signedTx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SendTransaction err: %v", err)
 	}
+
+	log.Debug("Send Message successfully", "txHash", signedTx.Hash().Hex(), "from", msg.From.Hex(),
+		"to", msg.To.Hex(), "value", msg.Value)
 
 	return signedTx, nil
 }
@@ -156,8 +211,7 @@ func (c *Client) NewTransaction(ctx context.Context, msg ethereum.CallMsg) (*typ
 		}
 	}
 
-	// TODO: nonce manager
-	nonce, err := c.rawClient.PendingNonceAt(ctx, msg.From)
+	nonce, err := c.nm.PendingNonceAt(ctx, msg.From)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +279,7 @@ func (c *Client) MessageToTransactOpts(ctx context.Context, msg Message) (*bind.
 	}
 	msg.From = crypto.PubkeyToAddress(msg.PrivateKey.PublicKey)
 
-	nonce, err := c.rawClient.PendingNonceAt(ctx, msg.From)
+	nonce, err := c.nm.PendingNonceAt(ctx, msg.From)
 	if err != nil {
 		return nil, err
 	}

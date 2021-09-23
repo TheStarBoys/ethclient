@@ -82,7 +82,8 @@ func main() {
 	}()
 
 	for tx := range txs {
-		fmt.Printf("Send multiple message successful, txHash: %v, err: %v\n", tx.Hash().Hex(), <-errs)
+        fmt.Printf("Send multiple message successful, txHash: %v, nonce: %v, err: %v\n",
+            tx.Hash().Hex(), tx.Nonce(), <-errs)
 	}
 }
 ```
