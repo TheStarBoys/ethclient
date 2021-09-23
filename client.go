@@ -131,13 +131,18 @@ func (c *Client) CallMsg(ctx context.Context, msg Message, blockNumber *big.Int)
 	return c.rawClient.CallContract(ctx, ethMesg, blockNumber)
 }
 
-func (c *Client) SafeSendMsg(ctx context.Context, msg Message) (*types.Transaction, error) {
-	_, err := c.CallMsg(ctx, msg, nil)
+func (c *Client) SafeSendMsg(ctx context.Context, msg Message) (*types.Transaction, []byte, error) {
+	returnData, err := c.CallMsg(ctx, msg, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return c.SendMsg(ctx, msg)
+	tx, err := c.SendMsg(ctx, msg)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return tx, returnData, err
 }
 
 func (c *Client) SendMsg(ctx context.Context, msg Message) (*types.Transaction, error) {
